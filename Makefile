@@ -31,7 +31,7 @@ whisper:
 		else \
 			(cd $(WHISPER_CPP_DIR) && git pull); \
 		fi; \
-		cd $(WHISPER_CPP_DIR) && ./build-xcframework.sh; \
+		cd $(WHISPER_CPP_DIR) && ./build-macos-framework.sh; \
 	else \
 		echo "whisper.xcframework already built in $(DEPS_DIR), skipping build"; \
 	fi
