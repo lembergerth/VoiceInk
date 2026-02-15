@@ -127,7 +127,11 @@ class AudioTranscriptionManager: ObservableObject {
                         NotificationCenter.default.post(name: .transcriptionCompleted, object: transcription)
                         currentTranscription = transcription
                     } catch {
-                        logger.error("Enhancement failed: \(error.localizedDescription)")
+                        if error is CancellationError {
+                            logger.info("Enhancement cancelled")
+                        } else {
+                            logger.error("Enhancement failed: \(error.localizedDescription)")
+                        }
                         let transcription = Transcription(
                             text: text,
                             duration: duration,
@@ -166,6 +170,8 @@ class AudioTranscriptionManager: ObservableObject {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 await finishProcessing()
                 
+            } catch is CancellationError {
+                await finishProcessing()
             } catch {
                 await handleError(error)
             }

@@ -195,6 +195,10 @@ struct AudioTranscribeView: View {
                 .scaleEffect(0.8)
             Text(transcriptionManager.processingPhase.message)
                 .font(.headline)
+            Button("Cancel") {
+                transcriptionManager.cancelProcessing()
+            }
+            .buttonStyle(.bordered)
         }
         .padding()
     }
