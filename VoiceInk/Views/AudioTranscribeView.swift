@@ -8,35 +8,40 @@ struct AudioTranscribeView: View {
     @EnvironmentObject private var whisperState: WhisperState
     @StateObject private var transcriptionManager = AudioTranscriptionManager.shared
     @State private var isDropTargeted = false
-    @State private var selectedAudioURL: URL?
-    @State private var isAudioFileSelected = false
+    @State private var selectedAudioURLs: [URL] = []
+    @State private var areAudioFilesSelected = false
     @State private var isEnhancementEnabled = false
     @State private var selectedPromptId: UUID?
-    
+
     var body: some View {
         ZStack {
             Color(NSColor.controlBackgroundColor)
                 .ignoresSafeArea()
-            
+
             VStack(spacing: 0) {
                 if transcriptionManager.isProcessing {
                     processingView
                 } else {
                     dropZoneView
                 }
-                
+
                 Divider()
                     .padding(.vertical)
-                
-                // Show current transcription result
-                if let transcription = transcriptionManager.currentTranscription {
-                    TranscriptionResultView(transcription: transcription)
+
+                // Show transcription results
+                if !transcriptionManager.completedResults.isEmpty {
+                    if transcriptionManager.completedResults.count == 1,
+                       let result = transcriptionManager.completedResults.first {
+                        TranscriptionResultView(transcription: result.transcription)
+                    } else {
+                        BatchTranscriptionResultsView(results: transcriptionManager.completedResults)
+                    }
                 }
             }
         }
         .onDrop(of: [.fileURL, .data, .audio, .movie], isTargeted: $isDropTargeted) { providers in
-            if !transcriptionManager.isProcessing && !isAudioFileSelected {
-                handleDroppedFile(providers)
+            if !transcriptionManager.isProcessing && !areAudioFilesSelected {
+                handleDroppedFiles(providers)
                 return true
             }
             return false
@@ -57,14 +62,32 @@ struct AudioTranscribeView: View {
             }
         }
     }
-    
+
     private var dropZoneView: some View {
         VStack(spacing: 16) {
-            if isAudioFileSelected {
+            if areAudioFilesSelected {
                 VStack(spacing: 16) {
-                    Text("Audio file selected: \(selectedAudioURL?.lastPathComponent ?? "")")
-                        .font(.headline)
-                    
+                    if selectedAudioURLs.count == 1 {
+                        Text("Audio file selected: \(selectedAudioURLs.first?.lastPathComponent ?? "")")
+                            .font(.headline)
+                    } else {
+                        Text("\(selectedAudioURLs.count) audio files selected")
+                            .font(.headline)
+
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(Array(selectedAudioURLs.enumerated()), id: \.offset) { index, url in
+                                    Text("\(index + 1). \(url.lastPathComponent)")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 120)
+                        .padding(.horizontal)
+                    }
+
                     // AI Enhancement Settings
                     if let enhancementService = whisperState.getEnhancementService() {
                         VStack(spacing: 16) {
@@ -75,16 +98,16 @@ struct AudioTranscribeView: View {
                                     .onChange(of: isEnhancementEnabled) { oldValue, newValue in
                                         enhancementService.isEnhancementEnabled = newValue
                                     }
-                                
+
                                 if isEnhancementEnabled {
                                     Divider()
                                         .frame(height: 20)
-                                    
+
                                     // Prompt Selection
                                     HStack(spacing: 8) {
                                         Text("Prompt:")
                                             .font(.subheadline)
-                                        
+
                                         if enhancementService.allPrompts.isEmpty {
                                             Text("No prompts available")
                                                 .foregroundColor(.secondary)
@@ -100,7 +123,7 @@ struct AudioTranscribeView: View {
                                                     enhancementService.selectedPromptId = newValue
                                                 }
                                             )
-                                            
+
                                             Picker("", selection: promptBinding) {
                                                 ForEach(enhancementService.allPrompts) { prompt in
                                                     Text(prompt.title).tag(prompt.id)
@@ -123,23 +146,21 @@ struct AudioTranscribeView: View {
                             selectedPromptId = enhancementService.selectedPromptId
                         }
                     }
-                    
+
                     // Action Buttons in a row
                     HStack(spacing: 12) {
                         Button("Start Transcription") {
-                            if let url = selectedAudioURL {
-                                transcriptionManager.startProcessing(
-                                    url: url,
-                                    modelContext: modelContext,
-                                    whisperState: whisperState
-                                )
-                            }
+                            transcriptionManager.startBatchProcessing(
+                                urls: selectedAudioURLs,
+                                modelContext: modelContext,
+                                whisperState: whisperState
+                            )
                         }
                         .buttonStyle(.borderedProminent)
-                        
-                        Button("Choose Different File") {
-                            selectedAudioURL = nil
-                            isAudioFileSelected = false
+
+                        Button("Choose Different File\(selectedAudioURLs.count > 1 ? "s" : "")") {
+                            selectedAudioURLs = []
+                            areAudioFilesSelected = false
                         }
                         .buttonStyle(.bordered)
                     }
@@ -159,20 +180,20 @@ struct AudioTranscribeView: View {
                                 )
                                 .foregroundColor(isDropTargeted ? .blue : .gray.opacity(0.5))
                         )
-                    
+
                     VStack(spacing: 16) {
                         Image(systemName: "arrow.down.doc")
                             .font(.system(size: 32))
                             .foregroundColor(isDropTargeted ? .blue : .gray)
-                        
-                        Text("Drop audio or video file here")
+
+                        Text("Drop audio or video files here")
                             .font(.headline)
-                        
+
                         Text("or")
                             .foregroundColor(.secondary)
-                        
-                        Button("Choose File") {
-                            selectFile()
+
+                        Button("Choose Files") {
+                            selectFiles()
                         }
                         .buttonStyle(.bordered)
                     }
@@ -181,20 +202,36 @@ struct AudioTranscribeView: View {
                 .frame(height: 200)
                 .padding(.horizontal)
             }
-            
+
             Text("Supported formats: WAV, MP3, M4A, AIFF, MP4, MOV, AAC, FLAC, CAF, AMR, OGG, OPUS, 3GP")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
         .padding()
     }
-    
+
     private var processingView: some View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(0.8)
-            Text(transcriptionManager.processingPhase.message)
-                .font(.headline)
+
+            if transcriptionManager.totalFileCount > 1 {
+                Text("File \(transcriptionManager.currentFileIndex) of \(transcriptionManager.totalFileCount)")
+                    .font(.headline)
+                Text(transcriptionManager.processingPhase.message)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                ProgressView(
+                    value: Double(transcriptionManager.currentFileIndex - 1),
+                    total: Double(transcriptionManager.totalFileCount)
+                )
+                .frame(maxWidth: 200)
+            } else {
+                Text(transcriptionManager.processingPhase.message)
+                    .font(.headline)
+            }
+
             Button("Cancel") {
                 transcriptionManager.cancelProcessing()
             }
@@ -202,28 +239,26 @@ struct AudioTranscribeView: View {
         }
         .padding()
     }
-    
-    private func selectFile() {
+
+    private func selectFiles() {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = [
             .audio, .movie
         ]
-        
+
         if panel.runModal() == .OK {
-            if let url = panel.url {
-                selectedAudioURL = url
-                isAudioFileSelected = true
+            let validURLs = panel.urls.filter { SupportedMedia.isSupported(url: $0) }
+            if !validURLs.isEmpty {
+                selectedAudioURLs = validURLs
+                areAudioFilesSelected = true
             }
         }
     }
-    
-    private func handleDroppedFile(_ providers: [NSItemProvider]) {
-        guard let provider = providers.first else { return }
-        
-        // List of type identifiers to try
+
+    private func handleDroppedFiles(_ providers: [NSItemProvider]) {
         let typeIdentifiers = [
             UTType.fileURL.identifier,
             UTType.audio.identifier,
@@ -231,53 +266,79 @@ struct AudioTranscribeView: View {
             UTType.data.identifier,
             "public.file-url"
         ]
-        
-        // Try each type identifier
-        for typeIdentifier in typeIdentifiers {
-            if provider.hasItemConformingToTypeIdentifier(typeIdentifier) {
-                provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { (item, error) in
-                    if let error = error {
-                        print("Error loading dropped file with type \(typeIdentifier): \(error)")
-                        return
-                    }
-                    
-                    var fileURL: URL?
-                    
-                    if let url = item as? URL {
-                        fileURL = url
-                    } else if let data = item as? Data {
-                        // Try to create URL from data
-                        if let url = URL(dataRepresentation: data, relativeTo: nil) {
-                            fileURL = url
-                        } else if let urlString = String(data: data, encoding: .utf8),
-                                  let url = URL(string: urlString) {
-                            fileURL = url
+
+        var collectedURLs: [URL] = []
+        let group = DispatchGroup()
+        let lock = NSLock()
+
+        for provider in providers {
+            for typeIdentifier in typeIdentifiers {
+                if provider.hasItemConformingToTypeIdentifier(typeIdentifier) {
+                    group.enter()
+                    provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { (item, error) in
+                        defer { group.leave() }
+
+                        if let error = error {
+                            print("Error loading dropped file with type \(typeIdentifier): \(error)")
+                            return
                         }
-                    } else if let urlString = item as? String {
-                        fileURL = URL(string: urlString)
-                    }
-                    
-                    if let finalURL = fileURL {
-                        DispatchQueue.main.async {
-                            self.validateAndSetAudioFile(finalURL)
+
+                        var fileURL: URL?
+
+                        if let url = item as? URL {
+                            fileURL = url
+                        } else if let data = item as? Data {
+                            if let url = URL(dataRepresentation: data, relativeTo: nil) {
+                                fileURL = url
+                            } else if let urlString = String(data: data, encoding: .utf8),
+                                      let url = URL(string: urlString) {
+                                fileURL = url
+                            }
+                        } else if let urlString = item as? String {
+                            fileURL = URL(string: urlString)
                         }
-                        return
+
+                        if let finalURL = fileURL {
+                            lock.lock()
+                            collectedURLs.append(finalURL)
+                            lock.unlock()
+                        }
                     }
+                    break // Stop trying other type identifiers for this provider
                 }
-                break // Stop trying other types once we find a compatible one
+            }
+        }
+
+        group.notify(queue: .main) {
+            // Deduplicate by path and validate
+            var seen = Set<String>()
+            let uniqueURLs = collectedURLs.filter { url in
+                let path = url.path
+                guard !seen.contains(path) else { return false }
+                seen.insert(path)
+                return true
+            }
+
+            let validURLs = uniqueURLs.filter { url in
+                FileManager.default.fileExists(atPath: url.path) && SupportedMedia.isSupported(url: url)
+            }
+
+            if !validURLs.isEmpty {
+                self.selectedAudioURLs = validURLs
+                self.areAudioFilesSelected = true
             }
         }
     }
-    
+
     private func validateAndSetAudioFile(_ url: URL) {
         print("Attempting to validate file: \(url.path)")
-        
+
         // Check if file exists
         guard FileManager.default.fileExists(atPath: url.path) else {
             print("File does not exist at path: \(url.path)")
             return
         }
-        
+
         // Try to access security scoped resource
         let accessing = url.startAccessingSecurityScopedResource()
         defer {
@@ -285,15 +346,15 @@ struct AudioTranscribeView: View {
                 url.stopAccessingSecurityScopedResource()
             }
         }
-        
+
         // Validate file type
         guard SupportedMedia.isSupported(url: url) else { return }
-        
+
         print("File validated successfully: \(url.lastPathComponent)")
-        selectedAudioURL = url
-        isAudioFileSelected = true
+        selectedAudioURLs = [url]
+        areAudioFilesSelected = true
     }
-    
+
     private func formatDuration(_ duration: TimeInterval) -> String {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60

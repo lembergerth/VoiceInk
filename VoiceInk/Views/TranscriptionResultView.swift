@@ -7,7 +7,8 @@ enum TranscriptionTab: String, CaseIterable {
 
 struct TranscriptionResultView: View {
     let transcription: Transcription
-    
+    var showHeading: Bool = true
+
     @State private var selectedTab: TranscriptionTab = .original
     
     private var availableTabs: [TranscriptionTab] {
@@ -29,8 +30,10 @@ struct TranscriptionResultView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Transcription Result")
-                .font(.headline)
+            if showHeading {
+                Text("Transcription Result")
+                    .font(.headline)
+            }
             
             if availableTabs.count > 1 {
                 HStack(spacing: 2) {
@@ -101,6 +104,32 @@ struct TranscriptionResultView: View {
             }
             .buttonStyle(.plain)
             .animation(.easeInOut(duration: 0.2), value: isSelected)
+        }
+    }
+}
+
+struct BatchTranscriptionResultsView: View {
+    let results: [BatchTranscriptionResult]
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 24) {
+                ForEach(results) { result in
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(result.fileName)
+                            .font(.headline)
+                            .foregroundColor(.accentColor)
+                            .padding(.horizontal)
+
+                        TranscriptionResultView(transcription: result.transcription, showHeading: false)
+
+                        if result.id != results.last?.id {
+                            Divider()
+                                .padding(.top, 8)
+                        }
+                    }
+                }
+            }
         }
     }
 }
